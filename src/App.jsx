@@ -304,6 +304,11 @@ export default function App() {
         }),
       });
       if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const payload = await response.json();
+          throw new Error(payload.detail || "Register failed");
+        }
         const text = await response.text();
         throw new Error(text || "Register failed");
       }
@@ -313,7 +318,7 @@ export default function App() {
       setAuthPassword("");
     } catch (error) {
       console.error(error);
-      setAuthError("Не удалось зарегистрироваться.");
+      setAuthError(error.message || "Не удалось зарегистрироваться.");
     }
   }
 
@@ -330,6 +335,11 @@ export default function App() {
         body,
       });
       if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const payload = await response.json();
+          throw new Error(payload.detail || "Login failed");
+        }
         const text = await response.text();
         throw new Error(text || "Login failed");
       }
@@ -339,7 +349,7 @@ export default function App() {
       setAuthPassword("");
     } catch (error) {
       console.error(error);
-      setAuthError("Неверные данные для входа.");
+      setAuthError(error.message || "Неверные данные для входа.");
     }
   }
 
@@ -357,6 +367,40 @@ export default function App() {
           ? "Ошибка синхронизации"
           : "Ожидание";
 
+  if (!token) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1>TimeCheck</h1>
+          <p>Войдите или зарегистрируйтесь, чтобы продолжить</p>
+          <div className="auth-form">
+            <input
+              type="email"
+              placeholder="Email"
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+            />
+            <input
+              type="password"
+              placeholder="Пароль"
+              value={authPassword}
+              onChange={(event) => setAuthPassword(event.target.value)}
+            />
+            <div className="auth-actions">
+              <button onClick={loginUser} type="button">
+                Войти
+              </button>
+              <button onClick={registerUser} type="button">
+                Регистрация
+              </button>
+            </div>
+            {authError && <div className="auth-error">{authError}</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -364,39 +408,11 @@ export default function App() {
           <h1>TimeCheck</h1>
           <p>Офлайн учет времени по задачам</p>
         </div>
-        <div className="auth">
-          {token ? (
-            <div className="auth-logged">
-              <div className="auth-status">Вход выполнен</div>
-              <button onClick={logoutUser} type="button">
-                Выйти
-              </button>
-            </div>
-          ) : (
-            <div className="auth-form">
-              <input
-                type="email"
-                placeholder="Email"
-                value={authEmail}
-                onChange={(event) => setAuthEmail(event.target.value)}
-              />
-              <input
-                type="password"
-                placeholder="Пароль"
-                value={authPassword}
-                onChange={(event) => setAuthPassword(event.target.value)}
-              />
-              <div className="auth-actions">
-                <button onClick={loginUser} type="button">
-                  Войти
-                </button>
-                <button onClick={registerUser} type="button">
-                  Регистрация
-                </button>
-              </div>
-              {authError && <div className="auth-error">{authError}</div>}
-            </div>
-          )}
+        <div className="auth-logged">
+          <div className="auth-status">Вход выполнен</div>
+          <button onClick={logoutUser} type="button">
+            Выйти
+          </button>
         </div>
         <div className="sync">
           <button onClick={handleSync} type="button">
