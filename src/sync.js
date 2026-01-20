@@ -2,6 +2,10 @@ import { db } from "./db.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
+export function getToken() {
+  return localStorage.getItem("timecheck_token");
+}
+
 export async function syncAll() {
   const lastSync = (await db.meta.get("last_sync_at"))?.value ?? null;
   const outbox = await db.outbox.toArray();
@@ -15,9 +19,15 @@ export async function syncAll() {
       .map((item) => ({ op: item.op, data: item.payload })),
   };
 
+  const headers = { "Content-Type": "application/json" };
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE}/sync`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       last_sync_at: lastSync,
       changes,

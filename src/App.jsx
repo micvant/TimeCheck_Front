@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { db, generateId, nowIso } from "./db.js";
-import { syncAll } from "./sync.js";
+import { getToken, syncAll } from "./sync.js";
 
 const emptyForm = { title: "", description: "" };
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 function formatDuration(seconds) {
   const total = Math.max(0, Math.floor(seconds));
@@ -24,6 +25,10 @@ export default function App() {
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [showTasks, setShowTasks] = useState(true);
   const [showHistory, setShowHistory] = useState(true);
+  const [token, setToken] = useState(getToken());
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
 
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId),
@@ -271,6 +276,11 @@ export default function App() {
   }
 
   async function handleSync() {
+    if (!getToken()) {
+      setSyncStatus("error");
+      setAuthError("Нужно войти, чтобы синхронизировать.");
+      return;
+    }
     try {
       setSyncStatus("syncing");
       const serverTime = await syncAll();
@@ -280,6 +290,62 @@ export default function App() {
       console.error(error);
       setSyncStatus("error");
     }
+  }
+
+  async function registerUser() {
+    setAuthError("");
+    try {
+      const response = await fetch(`${API_BASE}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: authEmail.trim(),
+          password: authPassword,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Register failed");
+      }
+      const data = await response.json();
+      localStorage.setItem("timecheck_token", data.access_token);
+      setToken(data.access_token);
+      setAuthPassword("");
+    } catch (error) {
+      console.error(error);
+      setAuthError("Не удалось зарегистрироваться.");
+    }
+  }
+
+  async function loginUser() {
+    setAuthError("");
+    try {
+      const body = new URLSearchParams();
+      body.set("username", authEmail.trim());
+      body.set("password", authPassword);
+
+      const response = await fetch(`${API_BASE}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || "Login failed");
+      }
+      const data = await response.json();
+      localStorage.setItem("timecheck_token", data.access_token);
+      setToken(data.access_token);
+      setAuthPassword("");
+    } catch (error) {
+      console.error(error);
+      setAuthError("Неверные данные для входа.");
+    }
+  }
+
+  function logoutUser() {
+    localStorage.removeItem("timecheck_token");
+    setToken(null);
   }
 
   const statusLabel =
@@ -297,6 +363,40 @@ export default function App() {
         <div>
           <h1>TimeCheck</h1>
           <p>Офлайн учет времени по задачам</p>
+        </div>
+        <div className="auth">
+          {token ? (
+            <div className="auth-logged">
+              <div className="auth-status">Вход выполнен</div>
+              <button onClick={logoutUser} type="button">
+                Выйти
+              </button>
+            </div>
+          ) : (
+            <div className="auth-form">
+              <input
+                type="email"
+                placeholder="Email"
+                value={authEmail}
+                onChange={(event) => setAuthEmail(event.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="Пароль"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+              />
+              <div className="auth-actions">
+                <button onClick={loginUser} type="button">
+                  Войти
+                </button>
+                <button onClick={registerUser} type="button">
+                  Регистрация
+                </button>
+              </div>
+              {authError && <div className="auth-error">{authError}</div>}
+            </div>
+          )}
         </div>
         <div className="sync">
           <button onClick={handleSync} type="button">
