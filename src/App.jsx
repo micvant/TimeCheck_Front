@@ -29,6 +29,9 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [accountEmail, setAccountEmail] = useState(
+    localStorage.getItem("timecheck_email") || "",
+  );
 
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId),
@@ -314,7 +317,9 @@ export default function App() {
       }
       const data = await response.json();
       localStorage.setItem("timecheck_token", data.access_token);
+      localStorage.setItem("timecheck_email", authEmail.trim());
       setToken(data.access_token);
+      setAccountEmail(authEmail.trim());
       setAuthPassword("");
     } catch (error) {
       console.error(error);
@@ -345,7 +350,9 @@ export default function App() {
       }
       const data = await response.json();
       localStorage.setItem("timecheck_token", data.access_token);
+      localStorage.setItem("timecheck_email", authEmail.trim());
       setToken(data.access_token);
+      setAccountEmail(authEmail.trim());
       setAuthPassword("");
     } catch (error) {
       console.error(error);
@@ -355,7 +362,9 @@ export default function App() {
 
   function logoutUser() {
     localStorage.removeItem("timecheck_token");
+    localStorage.removeItem("timecheck_email");
     setToken(null);
+    setAccountEmail("");
   }
 
   const statusLabel =
@@ -408,19 +417,21 @@ export default function App() {
           <h1>TimeCheck</h1>
           <p>Офлайн учет времени по задачам</p>
         </div>
-        <div className="auth-logged">
-          <div className="auth-status">Вход выполнен</div>
-          <button onClick={logoutUser} type="button">
-            Выйти
-          </button>
-        </div>
-        <div className="sync">
-          <button onClick={handleSync} type="button">
+        <div className="header-actions">
+          <div className="account-email">
+            {accountEmail}
+          </div>
+          <button onClick={handleSync} type="button" className="sync-button">
             Синхронизировать
           </button>
-          <div className="sync-status">{statusLabel}</div>
-          <div className="sync-meta">
-            Последняя синхронизация: {lastSyncAt || "нет"}
+          <button onClick={logoutUser} type="button" className="logout-button">
+            Выйти
+          </button>
+          <div className="sync-info">
+            <div className="sync-status">{statusLabel}</div>
+            <div className="sync-meta">
+              Последняя синхронизация: {lastSyncAt || "нет"}
+            </div>
           </div>
         </div>
       </header>
