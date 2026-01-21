@@ -137,6 +137,11 @@ input {
   color: #6b7280;
 }
 
+.sync-error {
+  color: #dc2626;
+  font-size: 12px;
+}
+
 .panel {
   background: #fff;
   border-radius: 16px;
@@ -215,6 +220,11 @@ input {
 .task-item.active {
   border-color: #3a6ff7;
   background: #eef3ff;
+}
+
+.task-item.running {
+  border-color: #16a34a;
+  background: #ecfdf3;
 }
 
 .task-title {

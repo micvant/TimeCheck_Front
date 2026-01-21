@@ -3,7 +3,7 @@ import { db, generateId, nowIso } from "./db.js";
 import { getToken, syncAll } from "./sync.js";
 
 const emptyForm = { title: "", description: "" };
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 function formatDuration(seconds) {
   const total = Math.max(0, Math.floor(seconds));
@@ -11,6 +11,24 @@ function formatDuration(seconds) {
   const mins = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
   const secs = String(total % 60).padStart(2, "0");
   return `${hrs}:${mins}:${secs}`;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "";
+  }
+  const raw = String(value);
+  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(raw);
+  const date = new Date(hasTz ? raw : `${raw}Z`);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}.${month}.${year} ${hours}:${minutes}`;
 }
 
 export default function App() {
@@ -21,6 +39,7 @@ export default function App() {
   const [comment, setComment] = useState("");
   const [tick, setTick] = useState(Date.now());
   const [syncStatus, setSyncStatus] = useState("idle");
+  const [syncError, setSyncError] = useState("");
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [showTasks, setShowTasks] = useState(true);
@@ -142,33 +161,24 @@ export default function App() {
   }, [token, accountEmail]);
 
   useEffect(() => {
-    if (!userKey) {
-      return;
-    }
-    const assignUserId = async () => {
-      const tasksMissing = await db.tasks
-        .where("user_id")
-        .equals(undefined)
-        .toArray();
-      const entriesMissing = await db.time_entries
-        .where("user_id")
-        .equals(undefined)
-        .toArray();
-      if (!tasksMissing.length && !entriesMissing.length) {
-        return;
-      }
-      await db.transaction("rw", db.tasks, db.time_entries, async () => {
-        for (const task of tasksMissing) {
-          await db.tasks.put({ ...task, user_id: userKey });
-        }
-        for (const entry of entriesMissing) {
-          await db.time_entries.put({ ...entry, user_id: userKey });
-        }
-      });
-      await refreshData();
+    const cleanupOrphanRecords = async () => {
+      await db.transaction(
+        "rw",
+        db.tasks,
+        db.time_entries,
+        db.outbox,
+        async () => {
+          await db.tasks.where("user_id").equals(undefined).delete();
+          await db.tasks.where("user_id").equals(null).delete();
+          await db.time_entries.where("user_id").equals(undefined).delete();
+          await db.time_entries.where("user_id").equals(null).delete();
+          await db.outbox.where("user_id").equals(undefined).delete();
+          await db.outbox.where("user_id").equals(null).delete();
+        },
+      );
     };
-    assignUserId();
-  }, [userKey]);
+    cleanupOrphanRecords();
+  }, []);
 
   useEffect(() => {
     const timerId = setInterval(() => setTick(Date.now()), 1000);
@@ -335,13 +345,19 @@ export default function App() {
       return;
     }
     try {
+      setSyncError("");
       setSyncStatus("syncing");
+      const healthResponse = await fetch(`${API_BASE}/health`);
+      if (!healthResponse.ok) {
+        throw new Error(`API недоступен (${healthResponse.status})`);
+      }
       const serverTime = await syncAll(db, userKey);
       setLastSyncAt(serverTime);
       setSyncStatus("ok");
     } catch (error) {
       console.error(error);
       setSyncStatus("error");
+      setSyncError(error.message || "Синхронизация не удалась.");
     }
   }
 
@@ -501,8 +517,10 @@ export default function App() {
           <div className="sync-info">
             <div className="sync-status">{statusLabel}</div>
             <div className="sync-meta">
-              Последняя синхронизация: {lastSyncAt || "нет"}
+              Последняя синхронизация:{" "}
+              {lastSyncAt ? formatDateTime(lastSyncAt) : "нет"}
             </div>
+            {syncError && <div className="sync-error">{syncError}</div>}
           </div>
         </div>
       </header>
@@ -596,35 +614,40 @@ export default function App() {
             {tasks.length === 0 && (
               <div className="muted">Пока нет задач</div>
             )}
-            {tasks.map((task) => (
-              <div
-                key={task.id}
-                className={`task-item ${
-                  task.id === activeTaskId ? "active" : ""
-                }`}
-              >
-                <div>
-                  <div className="task-title">{task.title}</div>
-                  {task.description && (
-                    <div className="task-desc">{task.description}</div>
-                  )}
-                  <div className="task-time">
-                    Время: {formatDuration(getTaskSeconds(task.id))}
+            {tasks.map((task) => {
+              const isRunning = entries.some(
+                (entry) => entry.task_id === task.id && !entry.stopped_at,
+              );
+              return (
+                <div
+                  key={task.id}
+                  className={`task-item ${
+                    task.id === activeTaskId ? "active" : ""
+                  } ${isRunning ? "running" : ""}`}
+                >
+                  <div>
+                    <div className="task-title">{task.title}</div>
+                    {task.description && (
+                      <div className="task-desc">{task.description}</div>
+                    )}
+                    <div className="task-time">
+                      Время: {formatDuration(getTaskSeconds(task.id))}
+                    </div>
+                  </div>
+                  <div className="task-actions">
+                    <button
+                      onClick={() => setActiveTaskId(task.id)}
+                      type="button"
+                    >
+                      Выбрать
+                    </button>
+                    <button onClick={() => deleteTask(task.id)} type="button">
+                      Удалить
+                    </button>
                   </div>
                 </div>
-                <div className="task-actions">
-                  <button
-                    onClick={() => setActiveTaskId(task.id)}
-                    type="button"
-                  >
-                    Выбрать
-                  </button>
-                  <button onClick={() => deleteTask(task.id)} type="button">
-                    Удалить
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -646,9 +669,13 @@ export default function App() {
               <div className="muted">Записей пока нет</div>
             )}
             {(() => {
+              const taskIds = new Set(tasks.map((task) => task.id));
               const uniqueEntries = [];
               const seen = new Set();
               for (const entry of entries) {
+                if (!taskIds.has(entry.task_id)) {
+                  continue;
+                }
                 if (seen.has(entry.task_id)) {
                   continue;
                 }
@@ -685,7 +712,7 @@ export default function App() {
                         </div>
                         <div className="entry-meta">
                           {entry.comment && <span>{entry.comment}</span>}
-                          <span>{entry.started_at}</span>
+                          <span>{formatDateTime(entry.started_at)}</span>
                         </div>
                       </div>
                     );
