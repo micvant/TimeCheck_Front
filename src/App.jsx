@@ -186,18 +186,22 @@ export default function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (navigator.onLine) {
+      if (navigator.onLine && userKey) {
         handleSync();
       }
     }, 15000);
 
-    const onOnline = () => handleSync();
+    const onOnline = () => {
+      if (userKey) {
+        handleSync();
+      }
+    };
     window.addEventListener("online", onOnline);
     return () => {
       clearInterval(interval);
       window.removeEventListener("online", onOnline);
     };
-  }, []);
+  }, [userKey]);
 
   async function addOutbox(table, recordId, op, payload) {
     await db.outbox.put({
@@ -383,6 +387,9 @@ export default function App() {
     if (syncInFlight.current) {
       return;
     }
+    if (!userKey) {
+      return;
+    }
     if (!getToken()) {
       setSyncStatus("error");
       setAuthError("Нужно войти, чтобы синхронизировать.");
@@ -421,7 +428,7 @@ export default function App() {
   }
 
   async function syncIfOnline() {
-    if (navigator.onLine) {
+    if (navigator.onLine && userKey) {
       await handleSync();
     }
   }
