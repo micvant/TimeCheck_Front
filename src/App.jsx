@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { db, generateId, nowIso } from "./db.js";
 import { API_BASE, getToken, syncAll } from "./sync.js";
 
@@ -49,6 +49,7 @@ export default function App() {
   const [accountEmail, setAccountEmail] = useState(
     localStorage.getItem("timecheck_email") || "",
   );
+  const syncInFlight = useRef(false);
   const userKey = accountEmail.trim().toLowerCase();
 
   const activeTask = useMemo(
@@ -237,6 +238,7 @@ export default function App() {
     setForm(emptyForm);
     setActiveTaskId(task.id);
     await refreshData();
+    await syncIfOnline();
   }
 
   async function deleteTask(taskId) {
@@ -257,6 +259,7 @@ export default function App() {
       setActiveTaskId("");
     }
     await refreshData();
+    await syncIfOnline();
   }
 
   async function startTimer() {
@@ -290,6 +293,7 @@ export default function App() {
     }
     setComment("");
     await refreshData();
+    await syncIfOnline();
   }
 
   async function stopTimer() {
@@ -306,6 +310,7 @@ export default function App() {
     await db.time_entries.put(updated);
     await addOutbox("time_entries", updated.id, "upsert", updated);
     await refreshData();
+    await syncIfOnline();
   }
 
   async function clearActiveTaskTime() {
@@ -334,15 +339,20 @@ export default function App() {
       }
     });
     await refreshData();
+    await syncIfOnline();
   }
 
   async function handleSync() {
+    if (syncInFlight.current) {
+      return;
+    }
     if (!getToken()) {
       setSyncStatus("error");
       setAuthError("Нужно войти, чтобы синхронизировать.");
       return;
     }
     try {
+      syncInFlight.current = true;
       setSyncError("");
       setSyncStatus("syncing");
       console.log("Sync API base:", API_BASE);
@@ -368,6 +378,14 @@ export default function App() {
       } else {
         setSyncError(error.message || "Синхронизация не удалась.");
       }
+    } finally {
+      syncInFlight.current = false;
+    }
+  }
+
+  async function syncIfOnline() {
+    if (navigator.onLine) {
+      await handleSync();
     }
   }
 
