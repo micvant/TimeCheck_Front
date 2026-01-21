@@ -155,6 +155,12 @@ input {
   align-items: center;
 }
 
+.section-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .toggle-button {
   width: 32px;
   height: 32px;
@@ -162,6 +168,14 @@ input {
   border-radius: 8px;
   font-size: 18px;
   line-height: 1;
+}
+
+.danger-button {
+  background: #dc2626;
+}
+
+.danger-button:disabled {
+  background: #fca5a5;
 }
 
 .form-row {

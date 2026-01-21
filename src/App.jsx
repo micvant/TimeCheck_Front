@@ -285,7 +285,6 @@ export default function App() {
     };
     try {
       await db.time_entries.put(entry);
-      await addOutbox("time_entries", entry.id, "upsert", entry);
     } catch (error) {
       console.error(error);
       alert("Не удалось сохранить запись таймера локально.");
@@ -293,7 +292,6 @@ export default function App() {
     }
     setComment("");
     await refreshData();
-    await syncIfOnline();
   }
 
   async function stopTimer() {
@@ -336,6 +334,45 @@ export default function App() {
         };
         await db.time_entries.put(updated);
         await addOutbox("time_entries", updated.id, "delete", updated);
+      }
+    });
+    await refreshData();
+    await syncIfOnline();
+  }
+
+  async function clearAllTasks() {
+    if (!userKey) {
+      return;
+    }
+    const now = nowIso();
+    const [taskRows, entryRows] = await Promise.all([
+      db.tasks.where("user_id").equals(userKey).toArray(),
+      db.time_entries.where("user_id").equals(userKey).toArray(),
+    ]);
+    if (taskRows.length === 0 && entryRows.length === 0) {
+      return;
+    }
+    await db.transaction("rw", db.tasks, db.time_entries, db.outbox, async () => {
+      for (const task of taskRows) {
+        const updated = {
+          ...task,
+          deleted_at: now,
+          updated_at: now,
+          client_updated_at: now,
+        };
+        await db.tasks.put(updated);
+        await addOutbox("tasks", task.id, "delete", updated);
+      }
+      for (const entry of entryRows) {
+        const updated = {
+          ...entry,
+          stopped_at: entry.stopped_at ?? now,
+          deleted_at: now,
+          updated_at: now,
+          client_updated_at: now,
+        };
+        await db.time_entries.put(updated);
+        await addOutbox("time_entries", entry.id, "delete", updated);
       }
     });
     await refreshData();
@@ -651,13 +688,23 @@ export default function App() {
       <section className="panel">
         <div className="section-header">
           <h2>Задачи</h2>
-          <button
-            type="button"
-            className="toggle-button"
-            onClick={() => setShowTasks((prev) => !prev)}
-          >
-            {showTasks ? "-" : "+"}
-          </button>
+          <div className="section-controls">
+            <button
+              type="button"
+              className="danger-button"
+              onClick={clearAllTasks}
+              disabled={tasks.length === 0}
+            >
+              Очистить все
+            </button>
+            <button
+              type="button"
+              className="toggle-button"
+              onClick={() => setShowTasks((prev) => !prev)}
+            >
+              {showTasks ? "-" : "+"}
+            </button>
+          </div>
         </div>
         {showTasks && (
           <div className="task-list">
