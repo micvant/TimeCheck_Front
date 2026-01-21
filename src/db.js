@@ -9,6 +9,13 @@ db.version(1).stores({
   meta: "key",
 });
 
+db.version(2).stores({
+  tasks: "id, user_id, updated_at, deleted_at",
+  time_entries: "id, user_id, task_id, updated_at, deleted_at, started_at",
+  outbox: "id, table, record_id, user_id, client_updated_at",
+  meta: "key",
+});
+
 export function nowIso() {
   return new Date().toISOString();
 }

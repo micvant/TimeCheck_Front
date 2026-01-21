@@ -32,6 +32,7 @@ export default function App() {
   const [accountEmail, setAccountEmail] = useState(
     localStorage.getItem("timecheck_email") || "",
   );
+  const userKey = accountEmail.trim().toLowerCase();
 
   const activeTask = useMemo(
     () => tasks.find((task) => task.id === activeTaskId),
@@ -100,14 +101,24 @@ export default function App() {
   const timerDisplaySeconds = activeTaskId ? activeTaskSeconds : 0;
 
   async function refreshData() {
+    if (!userKey) {
+      setTasks([]);
+      setEntries([]);
+      setLastSyncAt(null);
+      return;
+    }
     const [taskRows, entryRows, lastSyncRow] = await Promise.all([
       db.tasks.toArray(),
       db.time_entries.toArray(),
-      db.meta.get("last_sync_at"),
+      db.meta.get(`last_sync_at:${userKey}`),
     ]);
 
-    const visibleTasks = taskRows.filter((task) => !task.deleted_at);
-    const visibleEntries = entryRows.filter((entry) => !entry.deleted_at);
+    const visibleTasks = taskRows.filter(
+      (task) => !task.deleted_at && task.user_id === userKey,
+    );
+    const visibleEntries = entryRows.filter(
+      (entry) => !entry.deleted_at && entry.user_id === userKey,
+    );
 
     setTasks(
       visibleTasks.sort((a, b) => a.created_at.localeCompare(b.created_at)),
@@ -121,7 +132,43 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
-  }, []);
+  }, [userKey]);
+
+  useEffect(() => {
+    const storedEmail = localStorage.getItem("timecheck_email") || "";
+    if (token && storedEmail && storedEmail !== accountEmail) {
+      setAccountEmail(storedEmail);
+    }
+  }, [token, accountEmail]);
+
+  useEffect(() => {
+    if (!userKey) {
+      return;
+    }
+    const assignUserId = async () => {
+      const tasksMissing = await db.tasks
+        .where("user_id")
+        .equals(undefined)
+        .toArray();
+      const entriesMissing = await db.time_entries
+        .where("user_id")
+        .equals(undefined)
+        .toArray();
+      if (!tasksMissing.length && !entriesMissing.length) {
+        return;
+      }
+      await db.transaction("rw", db.tasks, db.time_entries, async () => {
+        for (const task of tasksMissing) {
+          await db.tasks.put({ ...task, user_id: userKey });
+        }
+        for (const entry of entriesMissing) {
+          await db.time_entries.put({ ...entry, user_id: userKey });
+        }
+      });
+      await refreshData();
+    };
+    assignUserId();
+  }, [userKey]);
 
   useEffect(() => {
     const timerId = setInterval(() => setTick(Date.now()), 1000);
@@ -150,6 +197,7 @@ export default function App() {
       record_id: recordId,
       op,
       payload,
+      user_id: userKey,
       client_updated_at: payload.client_updated_at,
     });
   }
@@ -161,6 +209,7 @@ export default function App() {
     const now = nowIso();
     const task = {
       id: generateId(),
+      user_id: userKey,
       title: form.title.trim(),
       description: form.description.trim() || null,
       created_at: now,
@@ -213,6 +262,7 @@ export default function App() {
     const now = nowIso();
     const entry = {
       id: generateId(),
+      user_id: userKey,
       task_id: activeTaskId,
       started_at: now,
       stopped_at: null,
@@ -286,7 +336,7 @@ export default function App() {
     }
     try {
       setSyncStatus("syncing");
-      const serverTime = await syncAll();
+      const serverTime = await syncAll(db, userKey);
       setLastSyncAt(serverTime);
       setSyncStatus("ok");
     } catch (error) {
@@ -297,13 +347,19 @@ export default function App() {
 
   async function registerUser() {
     setAuthError("");
+    const email = authEmail.trim();
+    const password = authPassword.trim();
+    if (!email || !password) {
+      setAuthError("Email и пароль обязательны.");
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: authEmail.trim(),
-          password: authPassword,
+          email,
+          password,
         }),
       });
       if (!response.ok) {
@@ -317,9 +373,9 @@ export default function App() {
       }
       const data = await response.json();
       localStorage.setItem("timecheck_token", data.access_token);
-      localStorage.setItem("timecheck_email", authEmail.trim());
+      localStorage.setItem("timecheck_email", email);
       setToken(data.access_token);
-      setAccountEmail(authEmail.trim());
+      setAccountEmail(email);
       setAuthPassword("");
     } catch (error) {
       console.error(error);
@@ -329,10 +385,16 @@ export default function App() {
 
   async function loginUser() {
     setAuthError("");
+    const email = authEmail.trim();
+    const password = authPassword.trim();
+    if (!email || !password) {
+      setAuthError("Email и пароль обязательны.");
+      return;
+    }
     try {
       const body = new URLSearchParams();
-      body.set("username", authEmail.trim());
-      body.set("password", authPassword);
+      body.set("username", email);
+      body.set("password", password);
 
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
@@ -350,9 +412,9 @@ export default function App() {
       }
       const data = await response.json();
       localStorage.setItem("timecheck_token", data.access_token);
-      localStorage.setItem("timecheck_email", authEmail.trim());
+      localStorage.setItem("timecheck_email", email);
       setToken(data.access_token);
-      setAccountEmail(authEmail.trim());
+      setAccountEmail(email);
       setAuthPassword("");
     } catch (error) {
       console.error(error);
@@ -360,11 +422,20 @@ export default function App() {
     }
   }
 
-  function logoutUser() {
+  async function logoutUser() {
     localStorage.removeItem("timecheck_token");
     localStorage.removeItem("timecheck_email");
     setToken(null);
     setAccountEmail("");
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthError("");
+    setTasks([]);
+    setEntries([]);
+    setActiveTaskId("");
+    setComment("");
+    setShowAllHistory(false);
+    setLastSyncAt(null);
   }
 
   const statusLabel =

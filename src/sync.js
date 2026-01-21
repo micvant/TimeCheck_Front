@@ -1,14 +1,15 @@
-import { db } from "./db.js";
-
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 export function getToken() {
   return localStorage.getItem("timecheck_token");
 }
 
-export async function syncAll() {
-  const lastSync = (await db.meta.get("last_sync_at"))?.value ?? null;
-  const outbox = await db.outbox.toArray();
+export async function syncAll(db, userKey) {
+  const lastSync =
+    (await db.meta.get(`last_sync_at:${userKey}`))?.value ?? null;
+  const outbox = (await db.outbox.toArray()).filter(
+    (item) => item.user_id === userKey,
+  );
 
   const changes = {
     tasks: outbox
@@ -49,14 +50,17 @@ export async function syncAll() {
     db.meta,
     async () => {
       for (const task of data.tasks) {
-        await db.tasks.put(task);
+        await db.tasks.put({ ...task, user_id: userKey });
       }
       for (const entry of data.time_entries) {
-        await db.time_entries.put(entry);
+        await db.time_entries.put({ ...entry, user_id: userKey });
       }
 
-      await db.outbox.clear();
-      await db.meta.put({ key: "last_sync_at", value: data.server_time });
+      await db.outbox.where("user_id").equals(userKey).delete();
+      await db.meta.put({
+        key: `last_sync_at:${userKey}`,
+        value: data.server_time,
+      });
     },
   );
 
