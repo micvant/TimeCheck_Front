@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { db, generateId, nowIso } from "./db.js";
-import { getToken, syncAll } from "./sync.js";
+import { API_BASE, getToken, syncAll } from "./sync.js";
 
 const emptyForm = { title: "", description: "" };
-const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
-
 function formatDuration(seconds) {
   const total = Math.max(0, Math.floor(seconds));
   const hrs = String(Math.floor(total / 3600)).padStart(2, "0");
@@ -349,17 +347,27 @@ export default function App() {
       setSyncStatus("syncing");
       console.log("Sync API base:", API_BASE);
       console.log("Sync token:", getToken() ? "present" : "missing");
-      const healthResponse = await fetch(`${API_BASE}/health`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const healthResponse = await fetch(`${API_BASE}/health`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       if (!healthResponse.ok) {
         throw new Error(`API недоступен (${healthResponse.status})`);
       }
       const serverTime = await syncAll(db, userKey);
       setLastSyncAt(serverTime);
+      await refreshData();
       setSyncStatus("ok");
     } catch (error) {
       console.error(error);
       setSyncStatus("error");
-      setSyncError(error.message || "Синхронизация не удалась.");
+      if (error.name === "AbortError") {
+        setSyncError("API не отвечает (timeout).");
+      } else {
+        setSyncError(error.message || "Синхронизация не удалась.");
+      }
     }
   }
 
