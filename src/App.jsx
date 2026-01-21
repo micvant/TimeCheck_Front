@@ -118,8 +118,8 @@ export default function App() {
 
   const timerDisplaySeconds = activeTaskId ? activeTaskSeconds : 0;
 
-  async function refreshData() {
-    if (!userKey) {
+  async function refreshData(targetUserKey = userKey) {
+    if (!targetUserKey) {
       setTasks([]);
       setEntries([]);
       setLastSyncAt(null);
@@ -128,14 +128,14 @@ export default function App() {
     const [taskRows, entryRows, lastSyncRow] = await Promise.all([
       db.tasks.toArray(),
       db.time_entries.toArray(),
-      db.meta.get(`last_sync_at:${userKey}`),
+      db.meta.get(`last_sync_at:${targetUserKey}`),
     ]);
 
     const visibleTasks = taskRows.filter(
-      (task) => !task.deleted_at && task.user_id === userKey,
+      (task) => !task.deleted_at && task.user_id === targetUserKey,
     );
     const visibleEntries = entryRows.filter(
-      (entry) => !entry.deleted_at && entry.user_id === userKey,
+      (entry) => !entry.deleted_at && entry.user_id === targetUserKey,
     );
 
     setTasks(
@@ -184,24 +184,21 @@ export default function App() {
     return () => clearInterval(timerId);
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (navigator.onLine && userKey) {
-        handleSync();
-      }
-    }, 15000);
-
-    const onOnline = () => {
-      if (userKey) {
-        handleSync();
-      }
-    };
-    window.addEventListener("online", onOnline);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [userKey]);
+  async function resetLocalData() {
+    await db.transaction(
+      "rw",
+      db.tasks,
+      db.time_entries,
+      db.outbox,
+      db.meta,
+      async () => {
+        await db.tasks.clear();
+        await db.time_entries.clear();
+        await db.outbox.clear();
+        await db.meta.clear();
+      },
+    );
+  }
 
   async function addOutbox(table, recordId, op, payload) {
     await db.outbox.put({
@@ -383,11 +380,11 @@ export default function App() {
     await syncIfOnline();
   }
 
-  async function handleSync() {
+  async function handleSync(targetUserKey = userKey) {
     if (syncInFlight.current) {
       return;
     }
-    if (!userKey) {
+    if (!targetUserKey) {
       return;
     }
     if (!getToken()) {
@@ -410,9 +407,9 @@ export default function App() {
       if (!healthResponse.ok) {
         throw new Error(`API недоступен (${healthResponse.status})`);
       }
-      const serverTime = await syncAll(db, userKey);
+      const serverTime = await syncAll(db, targetUserKey);
       setLastSyncAt(serverTime);
-      await refreshData();
+      await refreshData(targetUserKey);
       setSyncStatus("ok");
     } catch (error) {
       console.error(error);
@@ -427,9 +424,9 @@ export default function App() {
     }
   }
 
-  async function syncIfOnline() {
-    if (navigator.onLine && userKey) {
-      await handleSync();
+  async function syncIfOnline(targetUserKey = userKey) {
+    if (navigator.onLine && targetUserKey) {
+      await handleSync(targetUserKey);
     }
   }
 
@@ -465,6 +462,9 @@ export default function App() {
       setToken(data.access_token);
       setAccountEmail(email);
       setAuthPassword("");
+      await resetLocalData();
+      await refreshData(email.trim().toLowerCase());
+      await syncIfOnline(email.trim().toLowerCase());
     } catch (error) {
       console.error(error);
       setAuthError(error.message || "Не удалось зарегистрироваться.");
@@ -504,6 +504,9 @@ export default function App() {
       setToken(data.access_token);
       setAccountEmail(email);
       setAuthPassword("");
+      await resetLocalData();
+      await refreshData(email.trim().toLowerCase());
+      await syncIfOnline(email.trim().toLowerCase());
     } catch (error) {
       console.error(error);
       setAuthError(error.message || "Неверные данные для входа.");
