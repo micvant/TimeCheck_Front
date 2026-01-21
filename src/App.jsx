@@ -347,6 +347,8 @@ export default function App() {
     try {
       setSyncError("");
       setSyncStatus("syncing");
+      console.log("Sync API base:", API_BASE);
+      console.log("Sync token:", getToken() ? "present" : "missing");
       const healthResponse = await fetch(`${API_BASE}/health`);
       if (!healthResponse.ok) {
         throw new Error(`API недоступен (${healthResponse.status})`);
@@ -439,6 +441,28 @@ export default function App() {
   }
 
   async function logoutUser() {
+    if (userKey) {
+      const now = nowIso();
+      const running = await db.time_entries
+        .where("user_id")
+        .equals(userKey)
+        .filter((entry) => !entry.stopped_at)
+        .toArray();
+      if (running.length) {
+        await db.transaction("rw", db.time_entries, db.outbox, async () => {
+          for (const entry of running) {
+            const updated = {
+              ...entry,
+              stopped_at: now,
+              updated_at: now,
+              client_updated_at: now,
+            };
+            await db.time_entries.put(updated);
+            await addOutbox("time_entries", updated.id, "upsert", updated);
+          }
+        });
+      }
+    }
     localStorage.removeItem("timecheck_token");
     localStorage.removeItem("timecheck_email");
     setToken(null);
